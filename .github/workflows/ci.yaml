@@ -1,0 +1,66 @@
+# Quickstart for GitHub Actions
+# https://docs.github.com/en/actions/quickstart
+name: fast CI
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ${{ matrix.runner }}
+    # The Windows arm64 Java 8 leg runs an x64 JDK under emulation, which is much
+    # slower than a native JDK. The full build and the three agent test steps do not
+    # fit in 10 minutes there, so the time limit is raised for every leg.
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - os: macos-latest
+          java: 22
+          arch: arm64
+          runner: macos-latest
+          expander_leg: macos-latest-22-arm64
+      max-parallel: 64
+    name: Fast CI on Java ${{ matrix.java }} OS ${{ matrix.os }} [${{ 
+      matrix.expander_leg }}]
+
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-java@v4
+      with:
+        java-version: ${{ matrix.java }}
+        distribution: zulu
+          # Zulu has no native Java 8 build for Windows arm64, so that leg uses
+          # the x64 JDK, which runs on windows-11-arm through x64 emulation.
+          # Every other leg uses a native JDK for its own architecture.
+        architecture: ${{ (matrix.os == 'windows-latest' && matrix.arch == 
+          'arm64' && matrix.java == 8) && 'x64' || matrix.arch }}
+        cache: maven
+    - name: Build with Maven
+      run: ./mvnw -V --no-transfer-progress clean package
+    - name: Run unit test under ttl agent, include check for ExecutorService, 
+        ForkJoinPool, Timer/TimerTask
+      working-directory: ttl2-compatible
+      run: >
+        ../mvnw -V --no-transfer-progress
+        -Penable-ttl-agent-for-test
+        surefire:test
+        '-Dttl.agent.extra.d.options=-Drun-ttl-test-under-agent-with-enable-timer-task=true'
+    - name: Run unit test under ttl agent, and turn on the disable inheritable 
+        for thread pool enhancement
+      working-directory: ttl2-compatible
+      run: >
+        ../mvnw -V --no-transfer-progress
+        -Penable-ttl-agent-for-test
+        surefire:test
+        '-Dttl.agent.extra.args=ttl.agent.disable.inheritable.for.thread.pool:true'
+        '-Dttl.agent.extra.d.options=-Drun-ttl-test-under-agent-with-disable-inheritable=true'
+    - name: Run agent check for Timer/TimerTask, explicit 
+        "ttl.agent.enable.timer.task"
+      working-directory: ttl2-compatible
+      run: >
+        ../mvnw -V --no-transfer-progress
+        -Penable-ttl-agent-for-test
+        surefire:test
+        '-Dttl.agent.extra.args=ttl.agent.enable.timer.task:true'
+        '-Dttl.agent.extra.d.options=-Drun-ttl-test-under-agent-with-enable-timer-task=true'
